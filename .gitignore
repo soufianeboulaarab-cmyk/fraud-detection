@@ -1,0 +1,26 @@
+# Fichier secrets - JAMAIS commité
+devops/.env
+
+# Docker
+devops/volumes/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS Windows
+Thumbs.db
+desktop.ini
+
+# VS Code
+.vscode/settings.json
+
+# Logs
+*.log
