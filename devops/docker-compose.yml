@@ -226,3 +226,14 @@ services:
     networks:
       - fraud-net
 
+
+  simulator:
+    build:
+      context: ./simulation
+      dockerfile: Dockerfile
+    container_name: simulator
+    restart: "no"
+    depends_on:
+      - kafka-1
+    networks:
+      - fraud-net
