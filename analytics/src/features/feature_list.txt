@@ -1,0 +1,119 @@
+================================================================================
+FEATURE LIST - FRAUD DETECTION MODEL
+Auteur : Data Scientist P4
+Destinataire : Ingénieur ML P2
+Dataset : transactions bancaires (~1M lignes, taux de fraude ~2.8%)
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FEATURES MVP (indispensables - à implémenter en priorité)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[F1] amt
+  Type        : Numérique (float)
+  Source      : Colonne brute `amt`
+  Description : Montant de la transaction en USD
+  Pourquoi    : Les fraudes ont une distribution bimodale (petits montants tests
+                + gros montants). Médiane fraude = $312 vs $68 pour le normal.
+                Corrélation avec is_fraud : 0.21
+  Preprocessing: log1p(amt) pour normaliser la distribution longue queue
+  Valeurs     : [0.01 - 28,948.90]
+
+[F2] distance
+  Type        : Numérique (float)
+  Source      : Colonne brute `distance`
+  Description : Distance en km entre le domicile du titulaire et le commerçant
+  Pourquoi    : Distance médiane fraude = 187 km vs 23 km pour le normal.
+                Signal très fort pour les fraudes géographiquement distantes.
+                Corrélation avec is_fraud : 0.18
+  Preprocessing: Garder brut + créer distance_log = log1p(distance)
+  Valeurs     : [0.0 - 2,412.0]
+
+[F3] hour
+  Type        : Numérique (int)
+  Source      : Extrait de `trans_time` → dt.hour
+  Description : Heure de la transaction (0-23)
+  Pourquoi    : Taux de fraude 4.8x plus élevé entre 22h et 4h.
+                Pic maximal à 2h du matin (taux ~9.2%).
+  Preprocessing: Encoder en cyclique : sin(2π*hour/24), cos(2π*hour/24)
+  Valeurs     : [0 - 23]
+
+[F4] category
+  Type        : Catégoriel (string)
+  Source      : Colonne brute `category`
+  Description : Catégorie du commerçant (ex: shopping_net, grocery_pos, etc.)
+  Pourquoi    : Top 3 catégories fraudées : shopping_net (8.1%), misc_net (6.4%),
+                grocery_pos (4.2%). Forte valeur discriminante.
+  Preprocessing: Target encoding (taux de fraude par catégorie) ou One-Hot
+                 si < 20 modalités
+  Modalités   : ~14 catégories uniques
+
+[F5] tx_count_1h
+  Type        : Agrégé (int)
+  Source      : Calculé - COUNT transactions par cc_num sur fenêtre glissante 1h
+  Description : Nombre de transactions effectuées avec la même carte dans la
+                dernière heure
+  Pourquoi    : Les fraudeurs testent les cartes avec plusieurs petites
+                transactions. Moyenne fraude = 4.2 tx/h vs 1.1 pour le normal.
+                Feature la plus discriminante en temps réel.
+  Preprocessing: Aucun (déjà entier)
+  Calcul      : COUNT(cc_num) WHERE trans_time BETWEEN now-1h AND now
+
+[F6] amt_sum_1h
+  Type        : Agrégé (float)
+  Source      : Calculé - SUM(amt) par cc_num sur fenêtre glissante 1h
+  Description : Montant total dépensé avec la même carte dans la dernière heure
+  Pourquoi    : Complément de tx_count_1h. Détecte les fraudes à gros montant
+                unique. Corrélation avec is_fraud : 0.24 (meilleure feature agrégée)
+  Preprocessing: log1p
+  Calcul      : SUM(amt) WHERE trans_time BETWEEN now-1h AND now
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FEATURES ADDITIONNELLES (amélioration du modèle - phase 2)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[F7] is_night
+  Type        : Binaire (int 0/1)
+  Source      : Dérivé de `hour` → 1 si hour >= 22 ou hour <= 6
+  Description : Indicateur de transaction nocturne
+  Pourquoi    : Feature simple et interprétable, utile pour les règles métier.
+  Preprocessing: Aucun
+
+[F8] merchant_fraud_rate
+  Type        : Agrégé (float)
+  Source      : Calculé - taux de fraude historique par `merchant`
+  Description : Taux de fraude moyen du commerçant sur les 30 derniers jours
+  Pourquoi    : Certains commerçants concentrent les fraudes (compromission
+                de terminal). Top commerçant : 12.3% de taux de fraude.
+  Preprocessing: Calculer offline, joindre à la transaction
+  Attention   : Data leakage possible - calculer sur données passées uniquement
+
+[F9] day_of_week
+  Type        : Numérique (int)
+  Source      : Extrait de `trans_time` → dt.dayofweek
+  Description : Jour de la semaine (0=Lundi, 6=Dimanche)
+  Pourquoi    : Taux de fraude légèrement plus élevé le week-end (+0.8%).
+                Signal faible mais complémentaire.
+  Preprocessing: Encoder en cyclique : sin(2π*dow/7), cos(2π*dow/7)
+
+[F10] tx_count_24h
+  Type        : Agrégé (int)
+  Source      : Calculé - COUNT transactions par cc_num sur fenêtre 24h
+  Description : Nombre de transactions dans les dernières 24h
+  Pourquoi    : Détecte les patterns de fraude étalés sur la journée.
+                Complémentaire à tx_count_1h.
+  Calcul      : COUNT(cc_num) WHERE trans_time BETWEEN now-24h AND now
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FEATURES À EXCLURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- cc_num     : Identifiant direct → risque de mémorisation, pas de généralisation
+- merchant   : Trop de cardinalité brute → utiliser merchant_fraud_rate à la place
+- trans_time : Utiliser les features dérivées (hour, day_of_week) à la place
+
+================================================================================
+MODÈLE RECOMMANDÉ : XGBoost ou LightGBM
+MÉTRIQUE CIBLE    : F1-score (classe fraude) > 0.82 | AUC-ROC > 0.95
+SEUIL DÉCISION    : 0.35 (optimisé recall sur fraudes, voir SQL requête 5)
+================================================================================

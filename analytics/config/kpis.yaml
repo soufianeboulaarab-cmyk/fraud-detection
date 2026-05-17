@@ -1,0 +1,211 @@
+# ============================================================================
+# kpis.yaml — Définition des KPIs pour le pipeline de détection de fraude
+# Auteur  : Data Scientist P4
+# Usage   : P3 (Grafana alerting), P5 (Streaming thresholds), P2 (ML targets)
+# ============================================================================
+
+metadata:
+  version: "1.0.0"
+  dataset: "Kaggle Fraud Detection (Kartik)"
+  baseline_fraud_rate: 0.0058   # 0.58% sur le dataset complet
+
+# ============================================================================
+# KPIs MÉTIER
+# ============================================================================
+business_kpis:
+
+  - id: KPI-1
+    name: fraud_rate_global
+    label: "Taux de fraude global"
+    formula: "SUM(is_fraud) / COUNT(*) * 100"
+    unit: "%"
+    baseline: 0.58
+    target: 0.30
+    thresholds:
+      green:  { max: 0.50 }
+      orange: { min: 0.50, max: 1.00 }
+      red:    { min: 1.00 }
+    alert:
+      condition: "> 1.0 sur fenetre 15min"
+      severity: critical
+      notify: ["slack:#fraud-alerts", "pagerduty"]
+    refresh: "1min"
+    dashboard: fraud_overview
+
+  - id: KPI-2
+    name: amount_saved_daily
+    label: "Montant fraude detecte par jour"
+    formula: "SUM(amt) WHERE is_fraud=1 AND detected=true"
+    unit: "USD"
+    baseline: 42000
+    target: 60000
+    thresholds:
+      green:  { min: 50000 }
+      orange: { min: 20000, max: 50000 }
+      red:    { max: 20000 }
+    alert:
+      condition: "< 20000 sur la journee"
+      severity: warning
+      notify: ["slack:#fraud-alerts"]
+    refresh: "1h"
+    dashboard: fraud_overview
+
+  - id: KPI-3
+    name: fraud_detected_24h
+    label: "Fraudes detectees sur 24h"
+    formula: "COUNT(*) WHERE predicted=1 AND actual=1"
+    unit: "count"
+    thresholds:
+      alert_drop_pct: 20   # alerte si baisse > 20% vs moyenne 7j
+    alert:
+      condition: "baisse > 20% vs moyenne 7 jours"
+      severity: warning
+      notify: ["slack:#fraud-alerts"]
+    refresh: "1h"
+    dashboard: fraud_overview
+
+# ============================================================================
+# KPIs MODÈLE ML
+# ============================================================================
+model_kpis:
+
+  - id: KPI-4
+    name: precision
+    label: "Precision du modele"
+    formula: "TP / (TP + FP)"
+    unit: "%"
+    target: 85.0
+    thresholds:
+      green:  { min: 85.0 }
+      orange: { min: 75.0, max: 85.0 }
+      red:    { max: 75.0 }
+    alert:
+      condition: "< 75% pendant 15min consecutives"
+      severity: critical
+      action: "declencher re-training pipeline"
+      notify: ["slack:#ml-alerts", "email:ml-team"]
+    refresh: "1h"
+    dashboard: model_performance
+
+  - id: KPI-5
+    name: recall
+    label: "Rappel du modele"
+    formula: "TP / (TP + FN)"
+    unit: "%"
+    target: 80.0
+    thresholds:
+      green:  { min: 80.0 }
+      orange: { min: 70.0, max: 80.0 }
+      red:    { max: 70.0 }
+    alert:
+      condition: "< 70% pendant 15min consecutives"
+      severity: critical
+      action: "declencher re-training pipeline"
+      notify: ["slack:#ml-alerts", "email:ml-team"]
+    refresh: "1h"
+    dashboard: model_performance
+
+  - id: KPI-6
+    name: f1_score
+    label: "F1-Score"
+    formula: "2 * precision * recall / (precision + recall)"
+    unit: "score"
+    target: 0.82
+    thresholds:
+      green:  { min: 0.82 }
+      orange: { min: 0.72, max: 0.82 }
+      red:    { max: 0.72 }
+    alert:
+      condition: "< 0.72"
+      severity: critical
+      action: "re-training automatique"
+    refresh: "1h"
+    dashboard: model_performance
+
+  - id: KPI-7
+    name: auc_roc
+    label: "AUC-ROC"
+    formula: "area under ROC curve"
+    unit: "score"
+    target: 0.95
+    thresholds:
+      green:  { min: 0.95 }
+      orange: { min: 0.90, max: 0.95 }
+      red:    { max: 0.90 }
+    alert:
+      condition: "< 0.90"
+      severity: warning
+      action: "investigation concept drift"
+    refresh: "24h"
+    storage: "mlflow"
+
+# ============================================================================
+# KPIs OPÉRATIONNELS
+# ============================================================================
+operational_kpis:
+
+  - id: KPI-8
+    name: inference_latency_p99
+    label: "Latence inference P99"
+    unit: "ms"
+    target: 50
+    thresholds:
+      green:  { max: 50 }
+      orange: { min: 50, max: 100 }
+      red:    { min: 100 }
+    alert:
+      condition: "> 100ms"
+      severity: critical
+      action: "verifier charge Kafka/Redis"
+      notify: ["pagerduty", "slack:#infra-alerts"]
+    refresh: "continu"
+    source: "prometheus"
+    dashboard: model_performance
+
+  - id: KPI-9
+    name: false_positive_rate_daily
+    label: "Faux positifs par jour"
+    formula: "FP / (FP + TN) * 100"
+    unit: "count"
+    target: 500
+    thresholds:
+      green:  { max: 500 }
+      orange: { min: 500, max: 1000 }
+      red:    { min: 1000 }
+    alert:
+      condition: "> 1000/jour"
+      severity: warning
+      action: "reviser seuil de decision (actuellement 0.35)"
+      notify: ["slack:#fraud-alerts"]
+    refresh: "1h"
+    dashboard: model_performance
+
+  - id: KPI-10
+    name: pipeline_availability
+    label: "Disponibilite pipeline"
+    unit: "%"
+    target: 99.9
+    thresholds:
+      green:  { min: 99.9 }
+      orange: { min: 99.0, max: 99.9 }
+      red:    { max: 99.0 }
+    alert:
+      condition: "interruption > 30 secondes"
+      severity: critical
+      notify: ["pagerduty"]
+    refresh: "continu"
+    owner: "P3-DevOps"
+
+# ============================================================================
+# DECISION THRESHOLDS (pour P2 et P5)
+# ============================================================================
+decision_thresholds:
+  hard_block:    0.85   # blocage automatique sans intervention
+  review_queue:  0.35   # envoi en file de revision manuelle
+  auto_approve:  0.10   # approbation automatique
+
+retraining_triggers:
+  f1_score_min:     0.72
+  recall_min:       0.70
+  precision_min:    0.75
+  schedule:         "every 14 days"   # re-entrainement preventif

@@ -1,0 +1,11 @@
+pandas
+numpy
+scikit-learn
+psycopg2-binary
+mlflow
+boto3
+jupyter
+matplotlib
+seaborn
+pytest
+pyyaml

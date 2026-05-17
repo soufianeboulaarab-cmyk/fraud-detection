@@ -1,0 +1,26 @@
+features:
+  numerical:
+    - amt_log
+    - distance_log
+    - city_pop_log
+    - hour_sin
+    - hour_cos
+    - dow_sin
+    - dow_cos
+    - tx_count_1h
+    - amt_sum_1h
+    - tx_count_10min
+    - amt_max_1h
+    - tx_count_24h
+    - merchant_fraud_rate_30d
+  categorical:
+    - category_fraud_rate
+  binary:
+    - is_night
+    - high_risk_category
+  temporal:
+    - hour
+    - day_of_week
+
+target: is_fraud
+decision_threshold: 0.35

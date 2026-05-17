@@ -1,0 +1,204 @@
+# ============================================================================
+# features.yaml - Configuration des features pour le pipeline streaming
+# Auteur  : Data Scientist P4
+# Destinataire : Ingénieur Streaming P5 (Kafka + Flink / Spark Streaming)
+# ============================================================================
+
+metadata:
+  version: "1.2.0"
+  model_target: is_fraud
+  decision_threshold: 0.35
+  expected_latency_ms: 50   # SLA temps réel
+
+# ============================================================================
+# FEATURES STATIQUES
+# Disponibles directement dans le message Kafka de la transaction
+# Aucun calcul supplémentaire requis
+# ============================================================================
+static_features:
+
+  - name: amt
+    type: float
+    source: transaction.amt
+    nullable: false
+    preprocessing:
+      - log1p
+    description: "Montant de la transaction en USD"
+    importance_rank: 1
+
+  - name: distance
+    type: float
+    source: transaction.distance
+    nullable: false
+    preprocessing:
+      - log1p
+    description: "Distance domicile-commerçant en km"
+    importance_rank: 2
+
+  - name: hour
+    type: int
+    source: "derived: transaction.trans_time.hour"
+    nullable: false
+    preprocessing:
+      - type: cyclical_encoding
+        period: 24
+        output_cols: [hour_sin, hour_cos]
+    description: "Heure de la transaction (0-23)"
+    importance_rank: 3
+
+  - name: day_of_week
+    type: int
+    source: "derived: transaction.trans_time.dayofweek"
+    nullable: false
+    preprocessing:
+      - type: cyclical_encoding
+        period: 7
+        output_cols: [dow_sin, dow_cos]
+    description: "Jour de la semaine (0=Lundi)"
+    importance_rank: 7
+
+  - name: is_night
+    type: int
+    source: "derived: 1 if hour >= 22 or hour <= 6 else 0"
+    nullable: false
+    preprocessing: none
+    description: "Indicateur transaction nocturne"
+    importance_rank: 5
+
+  - name: category
+    type: categorical
+    source: transaction.category
+    nullable: false
+    preprocessing:
+      - type: target_encoding
+        fallback: global_fraud_rate   # si catégorie inconnue
+        output_col: category_fraud_rate
+    known_values:
+      - shopping_net       # fraud_rate: 8.1%
+      - misc_net           # fraud_rate: 6.4%
+      - grocery_pos        # fraud_rate: 4.2%
+      - gas_transport      # fraud_rate: 3.1%
+      - entertainment      # fraud_rate: 2.8%
+      - food_dining        # fraud_rate: 2.1%
+      - health_fitness     # fraud_rate: 1.9%
+      - home               # fraud_rate: 1.4%
+      - kids_pets          # fraud_rate: 1.2%
+      - personal_care      # fraud_rate: 1.1%
+      - shopping_pos       # fraud_rate: 0.9%
+      - travel             # fraud_rate: 0.8%
+      - misc_pos           # fraud_rate: 0.7%
+      - grocery_net        # fraud_rate: 0.5%
+    description: "Catégorie du commerçant"
+    importance_rank: 4
+
+# ============================================================================
+# FEATURES DYNAMIQUES
+# Nécessitent des agrégations sur fenêtres glissantes
+# Calculées via Flink/Spark Streaming avec état distribué (Redis / RocksDB)
+# Clé de partitionnement : cc_num
+# ============================================================================
+dynamic_features:
+
+  - name: tx_count_1h
+    type: int
+    window: 1h
+    aggregation: count
+    partition_key: cc_num
+    nullable: false
+    preprocessing: none
+    description: "Nombre de transactions par carte dans la dernière heure"
+    importance_rank: 1
+    streaming_note: "Stocker dans Redis avec TTL=3600s, incrémenter à chaque tx"
+
+  - name: amt_sum_1h
+    type: float
+    window: 1h
+    aggregation: sum
+    field: amt
+    partition_key: cc_num
+    nullable: false
+    preprocessing:
+      - log1p
+    description: "Montant total par carte dans la dernière heure"
+    importance_rank: 2
+    streaming_note: "Stocker dans Redis avec TTL=3600s"
+
+  - name: tx_count_10min
+    type: int
+    window: 10min
+    aggregation: count
+    partition_key: cc_num
+    nullable: false
+    preprocessing: none
+    description: "Nombre de transactions par carte dans les 10 dernières minutes"
+    importance_rank: 3
+    streaming_note: "Fenêtre courte pour détecter les tests de carte rapides"
+
+  - name: amt_max_1h
+    type: float
+    window: 1h
+    aggregation: max
+    field: amt
+    partition_key: cc_num
+    nullable: false
+    preprocessing:
+      - log1p
+    description: "Montant maximum par carte dans la dernière heure"
+    importance_rank: 4
+
+  - name: tx_count_24h
+    type: int
+    window: 24h
+    aggregation: count
+    partition_key: cc_num
+    nullable: false
+    preprocessing: none
+    description: "Nombre de transactions par carte dans les dernières 24h"
+    importance_rank: 5
+    streaming_note: "Stocker dans Redis avec TTL=86400s"
+
+  - name: merchant_fraud_rate_30d
+    type: float
+    window: 30d
+    aggregation: mean
+    field: is_fraud
+    partition_key: merchant
+    nullable: false
+    preprocessing: none
+    default_value: 0.028   # taux de fraude global si commerçant inconnu
+    description: "Taux de fraude historique du commerçant sur 30 jours"
+    importance_rank: 6
+    streaming_note: "Calculer offline (batch quotidien), charger en Redis au démarrage"
+
+# ============================================================================
+# ORDRE DES FEATURES EN ENTRÉE DU MODÈLE
+# Respecter cet ordre exact pour l'inférence
+# ============================================================================
+model_input_order:
+  - amt              # après log1p → amt_log
+  - distance         # après log1p → distance_log
+  - hour_sin
+  - hour_cos
+  - dow_sin
+  - dow_cos
+  - is_night
+  - category_fraud_rate
+  - tx_count_1h
+  - amt_sum_1h       # après log1p
+  - tx_count_10min
+  - amt_max_1h       # après log1p
+  - tx_count_24h
+  - merchant_fraud_rate_30d
+
+# ============================================================================
+# ALERTES ET SEUILS MÉTIER
+# ============================================================================
+business_rules:
+  hard_block_threshold: 0.85    # bloquer automatiquement sans intervention humaine
+  review_threshold: 0.35        # envoyer en file de révision manuelle
+  auto_approve_threshold: 0.10  # approuver automatiquement
+
+monitoring:
+  feature_drift_alert: true
+  null_rate_max_pct: 2.0        # alerter si taux de nulls > 2%
+  latency_sla_ms: 50
