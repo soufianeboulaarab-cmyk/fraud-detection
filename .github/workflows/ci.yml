@@ -2,9 +2,10 @@
 
 on:
   push:
-    branches: [devops, main]
+    branches: ["**"]
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   validate-infrastructure:
@@ -88,3 +89,4 @@ jobs:
         working-directory: devops
         if: always()
         run: docker compose down -v
+
