@@ -4,6 +4,7 @@
 
 volumes:
   zookeeper_data:
+  postgres_data:
   kafka1_data:
   kafka2_data:
   kafka3_data:
@@ -130,4 +131,21 @@ services:
     networks:
       - fraud-net
 
+
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - fraud-net
 
