@@ -1,0 +1,90 @@
+﻿name: CI - Fraud Detection DevOps
+
+on:
+  push:
+    branches: [devops, main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-infrastructure:
+    name: Valider Infrastructure DevOps
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Copier le fichier .env
+        working-directory: devops
+        run: |
+          cat > .env << EOF
+          POSTGRES_USER=fraud_user
+          POSTGRES_PASSWORD=FraudPass2024!
+          POSTGRES_DB=fraud_db
+          MINIO_ROOT_USER=minio_admin
+          MINIO_ROOT_PASSWORD=MinioPass2024!
+          GRAFANA_PASSWORD=GrafanaPass2024!
+          MLFLOW_TRACKING_URI=http://localhost:5000
+          EOF
+
+      - name: Valider la syntaxe docker-compose
+        working-directory: devops
+        run: docker compose config
+
+      - name: Demarrer Zookeeper et Kafka
+        working-directory: devops
+        run: docker compose up -d zookeeper kafka-1 kafka-2 kafka-3
+
+      - name: Attendre que Kafka soit pret
+        run: sleep 40
+
+      - name: Creer les 5 topics Kafka
+        working-directory: devops
+        run: |
+          docker exec kafka-1 kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic transactions-raw --partitions 10 --replication-factor 3
+          docker exec kafka-1 kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic transactions-enriched --partitions 10 --replication-factor 3
+          docker exec kafka-1 kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic fraud-labels --partitions 3 --replication-factor 3
+          docker exec kafka-1 kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic predictions --partitions 10 --replication-factor 3
+          docker exec kafka-1 kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic alerts --partitions 3 --replication-factor 3
+
+      - name: Verifier les topics Kafka
+        working-directory: devops
+        run: |
+          TOPICS=$(docker exec kafka-1 kafka-topics --bootstrap-server kafka-1:9092 --list)
+          echo "Topics trouves: $TOPICS"
+          echo "$TOPICS" | grep -q "transactions-raw" && echo "transactions-raw OK"
+          echo "$TOPICS" | grep -q "predictions" && echo "predictions OK"
+          echo "$TOPICS" | grep -q "alerts" && echo "alerts OK"
+
+      - name: Demarrer PostgreSQL
+        working-directory: devops
+        run: docker compose up -d postgres
+
+      - name: Attendre PostgreSQL
+        run: sleep 15
+
+      - name: Verifier PostgreSQL et les tables
+        working-directory: devops
+        run: |
+          docker exec postgres psql -U fraud_user -d fraud_db -c "\dt"
+          docker exec postgres psql -U fraud_user -d fraud_db -c "SELECT COUNT(*) FROM customers;"
+
+      - name: Demarrer Spark
+        working-directory: devops
+        run: docker compose up -d spark-master spark-worker-1 spark-worker-2
+
+      - name: Attendre Spark
+        run: sleep 20
+
+      - name: Verifier Spark Master
+        run: curl --fail http://localhost:8081 && echo "Spark Master UI OK"
+
+      - name: Afficher etat final
+        working-directory: devops
+        run: docker compose ps
+
+      - name: Arreter les conteneurs
+        working-directory: devops
+        if: always()
+        run: docker compose down -v
