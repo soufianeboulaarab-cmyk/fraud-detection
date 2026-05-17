@@ -5,6 +5,7 @@
 volumes:
   zookeeper_data:
   postgres_data:
+  minio_data:
   kafka1_data:
   kafka2_data:
   kafka3_data:
@@ -148,4 +149,46 @@ services:
       - "5432:5432"
     networks:
       - fraud-net
+
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - fraud-net
+
+  mlflow:
+    build:
+      context: ./mlflow
+      dockerfile: Dockerfile
+    container_name: mlflow
+    restart: unless-stopped
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      --default-artifact-root s3://mlflow/
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+      - minio
+    networks:
+      - fraud-net
+
 
