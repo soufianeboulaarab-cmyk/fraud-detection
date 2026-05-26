@@ -227,6 +227,31 @@ services:
       - fraud-net
 
 
+  spark-streaming-pipeline:
+    build:
+      context: ./spark-streaming
+      dockerfile: Dockerfile
+    container_name: spark-streaming-pipeline
+    restart: unless-stopped
+    depends_on:
+      - spark-master
+      - kafka-1
+      - kafka-2
+      - kafka-3
+      - postgres
+    environment:
+      SPARK_MASTER: spark://spark-master:7077
+      KAFKA_BROKERS: kafka-1:9092,kafka-2:9093,kafka-3:9094
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PORT: 5432
+    volumes:
+      - /home/pc/fraud-detection/streaming:/app
+    networks:
+      - fraud-net
+
   simulator:
     build:
       context: ./simulation
